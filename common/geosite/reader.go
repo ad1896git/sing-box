@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 
+	rwshim "github.com/sagernet/sing-box/common/rwshim"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/rw"
 )
@@ -85,7 +86,7 @@ func (r *Reader) Read(code string) ([]Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	counter := &rw.ReadCounter{Reader: r.reader}
+	counter := &rwshim.ReadCounter{Reader: r.reader}
 	domain := make([]Item, r.domainLength[code])
 	for i := range domain {
 		var (

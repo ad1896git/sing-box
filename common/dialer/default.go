@@ -51,11 +51,11 @@ func NewDefault(router adapter.Router, options option.DialerOptions) (*DefaultDi
 		listener.Control = control.Append(listener.Control, bindFunc)
 	}
 	if options.RoutingMark != 0 {
-		dialer.Control = control.Append(dialer.Control, control.RoutingMark(options.RoutingMark))
-		listener.Control = control.Append(listener.Control, control.RoutingMark(options.RoutingMark))
+		dialer.Control = control.Append(dialer.Control, control.RoutingMark(uint32(options.RoutingMark)))
+		listener.Control = control.Append(listener.Control, control.RoutingMark(uint32(options.RoutingMark)))
 	} else if router != nil && router.DefaultMark() != 0 {
-		dialer.Control = control.Append(dialer.Control, control.RoutingMark(router.DefaultMark()))
-		listener.Control = control.Append(listener.Control, control.RoutingMark(router.DefaultMark()))
+		dialer.Control = control.Append(dialer.Control, control.RoutingMark(uint32(router.DefaultMark())))
+		listener.Control = control.Append(listener.Control, control.RoutingMark(uint32(router.DefaultMark())))
 	}
 	if options.ReuseAddr {
 		listener.Control = control.Append(listener.Control, control.ReuseAddr())

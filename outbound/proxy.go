@@ -8,6 +8,7 @@ import (
 	"net"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/rwshim"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
@@ -108,7 +109,8 @@ func (l *ProxyListener) accept(ctx context.Context, conn *net.TCPConn) error {
 	}
 	switch headerType {
 	case socks4.Version, socks5.Version:
-		return socks.HandleConnection0(ctx, conn, headerType, l.authenticator, l, M.Metadata{})
+		reader := std_bufio.NewReader(bufio.NewCachedReader(conn, buf.As([]byte{headerType})))
+		return socks.HandleConnection0(ctx, conn, reader, l.authenticator, rwshim.HandlerWithLeftover(l, reader), M.Metadata{})
 	}
 	reader := std_bufio.NewReader(bufio.NewCachedReader(conn, buf.As([]byte{headerType})))
 	return http.HandleConnection(ctx, conn, reader, l.authenticator, l, M.Metadata{})
