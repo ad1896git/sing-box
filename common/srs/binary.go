@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/netip"
 
+	rwshim "github.com/sagernet/sing-box/common/rwshim"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
@@ -153,7 +154,7 @@ func readDefaultRule(reader io.Reader, recovery bool) (rule option.DefaultHeadle
 			rule.Network, err = readRuleItemString(reader)
 		case ruleItemDomain:
 			var matcher *domain.Matcher
-			matcher, err = domain.ReadMatcher(reader)
+			matcher, err = domain.ReadMatcher(rwshim.NewByteReader(reader))
 			if err != nil {
 				return
 			}
@@ -233,7 +234,7 @@ func writeDefaultRule(writer io.Writer, rule option.DefaultHeadlessRule) error {
 		if err != nil {
 			return err
 		}
-		err = domain.NewMatcher(rule.Domain, rule.DomainSuffix).Write(writer)
+		err = domain.NewMatcher(rule.Domain, rule.DomainSuffix, false).Write(rwshim.NewByteWriter(writer))
 		if err != nil {
 			return err
 		}

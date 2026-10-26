@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/rwshim"
 	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
@@ -57,7 +58,8 @@ func (h *Mixed) NewConnection(ctx context.Context, conn net.Conn, metadata adapt
 	}
 	switch headerType {
 	case socks4.Version, socks5.Version:
-		return socks.HandleConnection0(ctx, conn, headerType, h.authenticator, h.upstreamUserHandler(metadata), adapter.UpstreamMetadata(metadata))
+		reader := std_bufio.NewReader(bufio.NewCachedReader(conn, buf.As([]byte{headerType})))
+		return socks.HandleConnection0(ctx, conn, reader, h.authenticator, rwshim.HandlerWithLeftover(h.upstreamUserHandler(metadata), reader), adapter.UpstreamMetadata(metadata))
 	}
 	reader := std_bufio.NewReader(bufio.NewCachedReader(conn, buf.As([]byte{headerType})))
 	return http.HandleConnection(ctx, conn, reader, h.authenticator, h.upstreamUserHandler(metadata), adapter.UpstreamMetadata(metadata))
