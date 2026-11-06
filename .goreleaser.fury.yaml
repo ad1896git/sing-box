@@ -1,7 +1,7 @@
 project_name: sing-box
 builds:
   - id: main
-    main: ./cmd/sing-box
+    main: ./cmd/sing-box/sing-box
     flags:
       - -v
       - -trimpath
