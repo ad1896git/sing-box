@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
@@ -53,7 +52,7 @@ func NewHysteria2(ctx context.Context, router adapter.Router, logger log.Context
 			return nil, E.New("unknown obfs type: ", options.Obfs.Type)
 		}
 	}
-	outboundDialer, err := dialer.New(router, options.DialerOptions)
+	outboundDialer, err := newHysteriaDialer(router, options.DialerOptions, options.HopPorts)
 	if err != nil {
 		return nil, err
 	}

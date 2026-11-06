@@ -6,6 +6,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/dialer"
@@ -14,6 +15,7 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-dns"
 	"github.com/sagernet/sing-quic/hysteria"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
@@ -41,7 +43,7 @@ func NewHysteria(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
-	outboundDialer, err := dialer.New(router, options.DialerOptions)
+	outboundDialer, err := newHysteriaDialer(router, options.DialerOptions, options.HopPorts)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +106,50 @@ func NewHysteria(ctx context.Context, router adapter.Router, logger log.ContextL
 		},
 		client: client,
 	}, nil
+}
+
+// newHysteriaDialer validates hop_ports and creates the outbound dialer.
+// The hop target is the server IP the dialer resolved (sing-quic does not
+// resolve it again), so with port hopping a detour dialer also resolves the
+// server through the router, as dialer.New does without a detour.
+func newHysteriaDialer(router adapter.Router, options option.DialerOptions, hopPorts string) (N.Dialer, error) {
+	if hopPorts != "" {
+		err := option.ValidateHopPorts(hopPorts)
+		if err != nil {
+			return nil, err
+		}
+	}
+	outboundDialer, err := dialer.New(router, options)
+	if err != nil {
+		return nil, err
+	}
+	if hopPorts != "" && options.Detour != "" && router != nil {
+		outboundDialer = dialer.NewResolveDialer(router, hysteriaHopDialer{outboundDialer}, false, dns.DomainStrategy(options.DomainStrategy), time.Duration(options.FallbackDelay))
+	}
+	return outboundDialer, nil
+}
+
+// A proxy packet connection may expose its transport peer in RemoteAddr.
+// Preserve the logical IP selected by ResolveDialer for sing-quic's hop target.
+type hysteriaHopDialer struct {
+	N.Dialer
+}
+
+func (d hysteriaHopDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	conn, err := d.Dialer.DialContext(ctx, network, destination)
+	if err != nil {
+		return nil, err
+	}
+	return &hysteriaHopConn{Conn: conn, destination: destination}, nil
+}
+
+type hysteriaHopConn struct {
+	net.Conn
+	destination M.Socksaddr
+}
+
+func (c *hysteriaHopConn) RemoteAddr() net.Addr {
+	return c.destination.UDPAddr()
 }
 
 func (h *Hysteria) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
