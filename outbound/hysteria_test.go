@@ -4,6 +4,7 @@ package outbound
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"strconv"
@@ -136,6 +137,110 @@ func TestHysteriaHopDetourResolvesServer(t *testing.T) {
 			dialed := router.detour.dialedDestinations()
 			require.NotEmpty(t, dialed)
 			require.Equal(t, M.SocksaddrFrom(router.resolved, port), dialed[0])
+		})
+	}
+}
+
+// These fakes exercise DNS policy and both address families without requiring
+// IPv6 on the host. Every dial fails so serial fallback visits every result.
+type hopPolicyRouter struct {
+	adapter.Router
+	addresses      []netip.Addr
+	strategy       dns.DomainStrategy
+	lookups        int
+	defaultLookups int
+	lookupErr      error
+	detour         *hopPolicyDetour
+}
+
+func (r *hopPolicyRouter) Outbound(tag string) (adapter.Outbound, bool) {
+	return r.detour, tag == "front"
+}
+
+func (r *hopPolicyRouter) Lookup(ctx context.Context, domain string, strategy dns.DomainStrategy) ([]netip.Addr, error) {
+	r.lookups++
+	r.strategy = strategy
+	return r.addresses, r.lookupErr
+}
+
+func (r *hopPolicyRouter) LookupDefault(ctx context.Context, domain string) ([]netip.Addr, error) {
+	r.defaultLookups++
+	return r.addresses, r.lookupErr
+}
+
+type hopPolicyDetour struct {
+	adapter.Outbound
+	destinations []M.Socksaddr
+}
+
+func (d *hopPolicyDetour) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	d.destinations = append(d.destinations, destination)
+	return nil, errors.New("test detour dial failed")
+}
+
+func TestHysteriaHopDetourDNSPolicy(t *testing.T) {
+	ipv4 := netip.MustParseAddr("192.0.2.1")
+	ipv6 := netip.MustParseAddr("2001:db8::1")
+	for _, strategy := range []dns.DomainStrategy{
+		dns.DomainStrategyAsIS, dns.DomainStrategyPreferIPv4, dns.DomainStrategyPreferIPv6,
+		dns.DomainStrategyUseIPv4, dns.DomainStrategyUseIPv6,
+	} {
+		t.Run(strconv.Itoa(int(strategy)), func(t *testing.T) {
+			addresses := []netip.Addr{ipv4, ipv6}
+			switch strategy {
+			case dns.DomainStrategyPreferIPv6:
+				addresses = []netip.Addr{ipv6, ipv4}
+			case dns.DomainStrategyUseIPv4:
+				addresses = []netip.Addr{ipv4}
+			case dns.DomainStrategyUseIPv6:
+				addresses = []netip.Addr{ipv6}
+			}
+			router := &hopPolicyRouter{addresses: addresses, detour: &hopPolicyDetour{}}
+			d, err := newHysteriaDialer(router, option.DialerOptions{Detour: "front", DomainStrategy: option.DomainStrategy(strategy)}, "443")
+			require.NoError(t, err)
+			_, err = d.DialContext(context.Background(), "udp", M.ParseSocksaddrHostPort(hopTestServer, 443))
+			require.Error(t, err)
+			if strategy == dns.DomainStrategyAsIS {
+				require.Equal(t, 1, router.defaultLookups)
+				require.Zero(t, router.lookups)
+			} else {
+				require.Equal(t, 1, router.lookups)
+				require.Zero(t, router.defaultLookups)
+				require.Equal(t, strategy, router.strategy)
+			}
+			var expected []M.Socksaddr
+			for _, address := range addresses {
+				expected = append(expected, M.SocksaddrFrom(address, 443))
+			}
+			require.Equal(t, expected, router.detour.destinations)
+		})
+	}
+}
+
+func TestHysteriaHopDetourDNSFailure(t *testing.T) {
+	router := &hopPolicyRouter{lookupErr: dns.RCodeNameError, detour: &hopPolicyDetour{}}
+	d, err := newHysteriaDialer(router, option.DialerOptions{Detour: "front"}, "443")
+	require.NoError(t, err)
+	_, err = d.DialContext(context.Background(), "udp", M.ParseSocksaddrHostPort(hopTestServer, 443))
+	require.ErrorIs(t, err, dns.RCodeNameError)
+	require.Empty(t, router.detour.destinations)
+}
+
+func TestHysteriaDetourResolutionScope(t *testing.T) {
+	for _, test := range []struct{ name, server, hopPorts string }{
+		{"no-hop", hopTestServer, ""},
+		{"literal-ipv4", "192.0.2.1", "443"},
+		{"literal-ipv6", "2001:db8::1", "443"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router := &hopPolicyRouter{detour: &hopPolicyDetour{}}
+			d, err := newHysteriaDialer(router, option.DialerOptions{Detour: "front"}, test.hopPorts)
+			require.NoError(t, err)
+			destination := M.ParseSocksaddrHostPort(test.server, 443)
+			_, err = d.DialContext(context.Background(), "udp", destination)
+			require.Error(t, err)
+			require.Equal(t, []M.Socksaddr{destination}, router.detour.destinations)
+			require.Zero(t, router.lookups+router.defaultLookups)
 		})
 	}
 }
