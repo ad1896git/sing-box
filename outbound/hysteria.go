@@ -124,9 +124,32 @@ func newHysteriaDialer(router adapter.Router, options option.DialerOptions, hopP
 		return nil, err
 	}
 	if hopPorts != "" && options.Detour != "" && router != nil {
-		outboundDialer = dialer.NewResolveDialer(router, outboundDialer, false, dns.DomainStrategy(options.DomainStrategy), time.Duration(options.FallbackDelay))
+		outboundDialer = dialer.NewResolveDialer(router, hysteriaHopDialer{outboundDialer}, false, dns.DomainStrategy(options.DomainStrategy), time.Duration(options.FallbackDelay))
 	}
 	return outboundDialer, nil
+}
+
+// A proxy packet connection may expose its transport peer in RemoteAddr.
+// Preserve the logical IP selected by ResolveDialer for sing-quic's hop target.
+type hysteriaHopDialer struct {
+	N.Dialer
+}
+
+func (d hysteriaHopDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	conn, err := d.Dialer.DialContext(ctx, network, destination)
+	if err != nil {
+		return nil, err
+	}
+	return &hysteriaHopConn{Conn: conn, destination: destination}, nil
+}
+
+type hysteriaHopConn struct {
+	net.Conn
+	destination M.Socksaddr
+}
+
+func (c *hysteriaHopConn) RemoteAddr() net.Addr {
+	return c.destination.UDPAddr()
 }
 
 func (h *Hysteria) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {

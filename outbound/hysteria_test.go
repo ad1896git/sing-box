@@ -16,6 +16,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-dns"
+	"github.com/sagernet/sing-vmess/vless"
 	M "github.com/sagernet/sing/common/metadata"
 
 	"github.com/stretchr/testify/require"
@@ -171,10 +172,14 @@ func (r *hopPolicyRouter) LookupDefault(ctx context.Context, domain string) ([]n
 type hopPolicyDetour struct {
 	adapter.Outbound
 	destinations []M.Socksaddr
+	conn         net.Conn
 }
 
 func (d *hopPolicyDetour) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	d.destinations = append(d.destinations, destination)
+	if d.conn != nil {
+		return d.conn, nil
+	}
 	return nil, errors.New("test detour dial failed")
 }
 
@@ -241,6 +246,32 @@ func TestHysteriaDetourResolutionScope(t *testing.T) {
 			require.Error(t, err)
 			require.Equal(t, []M.Socksaddr{destination}, router.detour.destinations)
 			require.Zero(t, router.lookups+router.defaultLookups)
+		})
+	}
+}
+
+// VLESS PacketConn embeds the proxy transport: RemoteAddr describes the
+// proxy, not the logical UDP destination. Hopping must use the latter.
+func TestHysteriaHopDetourRemoteAddress(t *testing.T) {
+	for _, address := range []string{"192.0.2.1", "2001:db8::1"} {
+		t.Run(address, func(t *testing.T) {
+			client, err := vless.NewClient("b831381d-6324-4d53-ad4f-8cda48b30811", "", log.NewNOPFactory().Logger())
+			require.NoError(t, err)
+			transport, peer := net.Pipe()
+			defer transport.Close()
+			defer peer.Close()
+			resolved := netip.MustParseAddr(address)
+			destination := M.SocksaddrFrom(resolved, 443)
+			packetConn, err := client.DialEarlyPacketConn(transport, destination)
+			require.NoError(t, err)
+			router := &hopPolicyRouter{addresses: []netip.Addr{resolved}, detour: &hopPolicyDetour{conn: packetConn}}
+			d, err := newHysteriaDialer(router, option.DialerOptions{Detour: "front"}, "443")
+			require.NoError(t, err)
+			conn, err := d.DialContext(context.Background(), "udp", M.ParseSocksaddrHostPort(hopTestServer, 443))
+			require.NoError(t, err)
+			defer conn.Close()
+			require.Equal(t, destination, M.SocksaddrFromNet(conn.RemoteAddr()))
+			require.Equal(t, []M.Socksaddr{destination}, router.detour.destinations)
 		})
 	}
 }
