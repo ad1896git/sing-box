@@ -3,7 +3,7 @@ project_name: sing-box
 builds:
   - &template
     id: main
-    main: ./cmd/sing-box
+    main: ./cmd/sing-box/sing-box
     flags:
       - -v
       - -trimpath

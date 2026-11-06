@@ -2,16 +2,8 @@
 
 package boxmain
 
-import "github.com/sagernet/sing-box/log"
-
-func main() {
-	err := generateCompletions()
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func generateCompletions() error {
+// GenerateCompletions writes the shell completion files to release/completions.
+func GenerateCompletions() error {
 	err := mainCommand.GenBashCompletionFile("release/completions/sing-box.bash")
 	if err != nil {
 		return err
