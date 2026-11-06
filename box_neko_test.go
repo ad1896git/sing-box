@@ -50,6 +50,18 @@ func TestSetLogWritterNilFactory(t *testing.T) {
 	require.Nil(t, instance.logFactory)
 }
 
+func TestSetLogWritterNilWriter(t *testing.T) {
+	instance, err := New(Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, instance.Close()) })
+
+	var output bytes.Buffer
+	instance.SetLogWritter(&output)
+	require.NotPanics(t, func() { instance.SetLogWritter(nil) })
+	instance.logFactory.Logger().Info("writer kept")
+	require.Contains(t, output.String(), "writer kept")
+}
+
 func TestSetLogWritterMissingWriter(t *testing.T) {
 	factory := &struct{ log.Factory }{Factory: log.NewNOPFactory()}
 	instance := &Box{logFactory: factory}
