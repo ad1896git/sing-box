@@ -1,5 +1,12 @@
 package option
 
+import (
+	"strconv"
+	"strings"
+
+	E "github.com/sagernet/sing/common/exceptions"
+)
+
 type HysteriaInboundOptions struct {
 	ListenOptions
 	Up                  string         `json:"up,omitempty"`
@@ -38,4 +45,22 @@ type HysteriaOutboundOptions struct {
 	DisableMTUDiscovery bool        `json:"disable_mtu_discovery,omitempty"`
 	Network             NetworkList `json:"network,omitempty"`
 	OutboundTLSOptionsContainer
+}
+
+// ValidateHopPorts checks a hop_ports value as sing-quic udphop parses it:
+// comma-separated ports or start-end ranges, every port in 1-65535.
+func ValidateHopPorts(hopPorts string) error {
+	for _, portRange := range strings.Split(hopPorts, ",") {
+		bounds := strings.Split(portRange, "-")
+		if len(bounds) > 2 {
+			return E.New("invalid hop_ports range: ", portRange)
+		}
+		for _, bound := range bounds {
+			port, err := strconv.ParseUint(bound, 10, 16)
+			if err != nil || port == 0 {
+				return E.New("invalid hop_ports ", strconv.Quote(portRange), ": ports must be in 1-65535")
+			}
+		}
+	}
+	return nil
 }
