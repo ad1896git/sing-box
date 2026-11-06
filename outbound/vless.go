@@ -78,8 +78,8 @@ func NewVLESS(ctx context.Context, router adapter.Router, logger log.ContextLogg
 		}
 	}
 	muxOpts := common.PtrValueOrDefault(options.Multiplex)
-	if muxOpts.Enabled {
-		options.Flow = ""
+	if muxOpts.Enabled && options.Flow != "" {
+		return nil, E.New("flow ", options.Flow, " is not supported with multiplex, disable one of them")
 	}
 	outbound.client, err = vless.NewClient(options.UUID, options.Flow, logger)
 	if err != nil {
