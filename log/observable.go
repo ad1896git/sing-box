@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing/common"
@@ -18,6 +19,7 @@ type defaultFactory struct {
 	ctx               context.Context
 	formatter         Formatter
 	platformFormatter Formatter
+	writerMu          sync.RWMutex
 	writer            io.Writer
 	file              *os.File
 	filePath          string
@@ -65,7 +67,7 @@ func (f *defaultFactory) Start() error {
 		if err != nil {
 			return err
 		}
-		f.writer = logFile
+		f.setWriter(logFile)
 		f.file = logFile
 	}
 	return nil
@@ -120,7 +122,7 @@ func (l *observableLogger) Log(ctx context.Context, level Level, args []any) {
 		if level == LevelPanic {
 			panic(message)
 		}
-		l.writer.Write([]byte(message))
+		l.logWriter().Write([]byte(message))
 		if level == LevelFatal {
 			os.Exit(1)
 		}
@@ -130,7 +132,7 @@ func (l *observableLogger) Log(ctx context.Context, level Level, args []any) {
 		if level == LevelPanic {
 			panic(message)
 		}
-		l.writer.Write([]byte(message))
+		l.logWriter().Write([]byte(message))
 		if level == LevelFatal {
 			os.Exit(1)
 		}
