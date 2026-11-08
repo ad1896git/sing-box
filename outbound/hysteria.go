@@ -4,6 +4,7 @@ package outbound
 
 import (
 	"context"
+	"io"
 	"net"
 	"os"
 	"time"
@@ -130,7 +131,10 @@ func newHysteriaDialer(router adapter.Router, options option.DialerOptions, hopP
 }
 
 // A proxy packet connection may expose its transport peer in RemoteAddr.
-// Preserve the logical IP selected by ResolveDialer for sing-quic's hop target.
+// This dialer is private to the Hysteria clients with port hopping enabled:
+// DialContext("udp") supplies only the resolved peer and transport ownership;
+// QUIC data uses separate connections returned unchanged by ListenPacket.
+// It must not be used as a general purpose UDP dialer.
 type hysteriaHopDialer struct {
 	N.Dialer
 }
@@ -140,17 +144,37 @@ func (d hysteriaHopDialer) DialContext(ctx context.Context, network string, dest
 	if err != nil {
 		return nil, err
 	}
-	return &hysteriaHopConn{Conn: conn, destination: destination}, nil
+	if N.NetworkName(network) != N.NetworkUDP {
+		return conn, nil
+	}
+	return &hysteriaHopConn{Closer: conn, localAddr: conn.LocalAddr(), destination: destination}, nil
 }
 
+// hysteriaHopConn is an address/ownership handle, not a packet transport.
+// Implement net.Conn only for N.Dialer's return type. Reject data I/O instead
+// of silently hiding transport capabilities on a usable data connection.
+// In particular, do not add Upstream or advertise optional packet interfaces:
+// even real VLESS PacketConn does not implement N.PacketConn or N.ReadWaiter.
 type hysteriaHopConn struct {
-	net.Conn
+	io.Closer
+	localAddr   net.Addr
 	destination M.Socksaddr
+}
+
+func (c *hysteriaHopConn) LocalAddr() net.Addr {
+	return c.localAddr
 }
 
 func (c *hysteriaHopConn) RemoteAddr() net.Addr {
 	return c.destination.UDPAddr()
 }
+
+func (c *hysteriaHopConn) Read([]byte) (int, error)  { return 0, os.ErrInvalid }
+func (c *hysteriaHopConn) Write([]byte) (int, error) { return 0, os.ErrInvalid }
+
+func (c *hysteriaHopConn) SetDeadline(time.Time) error      { return os.ErrInvalid }
+func (c *hysteriaHopConn) SetReadDeadline(time.Time) error  { return os.ErrInvalid }
+func (c *hysteriaHopConn) SetWriteDeadline(time.Time) error { return os.ErrInvalid }
 
 func (h *Hysteria) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	switch N.NetworkName(network) {
